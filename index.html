@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LOL SKILL QUIZ PRO</title>
+    <title>LOL SKILL QUIZ</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Spiegel:wght@400;700&display=swap');
 
@@ -48,6 +48,19 @@
             color: var(--gold);
             text-transform: uppercase;
             margin: 0 0 35px 0;
+        }
+
+        .timer-container {
+            width: 100%;
+            height: 4px;
+            background: #1e2328;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+        #timer-bar {
+            width: 100%;
+            height: 100%;
+            background: var(--blue-hextech);
         }
 
         .skill-container {
@@ -100,7 +113,6 @@
             background: #2a2f35;
         }
 
-        /* ผลลัพธ์: กรอบเขียว (ข้อที่ถูก) */
         button.reveal-correct {
             background: rgba(0, 255, 136, 0.2) !important;
             border: 2px solid var(--green-success) !important;
@@ -110,7 +122,6 @@
             opacity: 1 !important;
         }
 
-        /* ผลลัพธ์: กรอบแดง (ข้อที่เลือกผิด) */
         button.reveal-wrong {
             background: rgba(255, 78, 80, 0.2) !important;
             border: 2px solid var(--red-error) !important;
@@ -145,21 +156,23 @@
 
         .score-val { font-size: 2.2rem; font-weight: 700; }
         .score-label { font-size: 10px; color: var(--gold-dark); text-transform: uppercase; letter-spacing: 2px; }
-
-        .loader {
-            width: 40px; height: 40px; border: 2px solid rgba(10, 200, 185, 0.1);
-            border-top-color: var(--blue-hextech); border-radius: 50%;
-            animation: spin 1s linear infinite; margin: 40px auto;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
 
-<div class="container" id="main-card">
-    <h2>LOL SKILL</h2>
-    <div id="loader"><div class="loader"></div></div>
+<div class="container">
+    <div id="setup-screen">
+        <h2>SELECT ROUNDS</h2>
+        <div class="options-grid">
+            <button onclick="startGame(10)">10 QUESTIONS</button>
+            <button onclick="startGame(20)">20 QUESTIONS</button>
+            <button onclick="startGame(50)">50 QUESTIONS</button>
+        </div>
+    </div>
+
     <div id="game-ui" style="display:none;">
+        <div style="font-size: 10px; margin-bottom: 5px; color: var(--gold);">PROGRESS: <span id="current-q">1</span>/<span id="total-q">10</span></div>
+        <div class="timer-container"><div id="timer-bar"></div></div>
         <div class="skill-container">
             <div class="skill-inner"><img id="skill-img" src=""></div>
         </div>
@@ -171,15 +184,25 @@
             <div><span id="wrong-count" class="score-val" style="color: var(--red-error);">0</span><br><span class="score-label">WRONG</span></div>
         </div>
     </div>
+
+    <div id="result-screen" style="display:none;">
+        <h2>FINISHED</h2>
+        <div class="score-val" id="final-score" style="font-size: 3.5rem; color: var(--gold);">0/0</div>
+        <div id="rank-text" style="letter-spacing: 5px; margin-top: 10px;">RANK: UNKNOWN</div>
+        <button onclick="location.reload()" style="width:100%; margin-top:30px;">PLAY AGAIN</button>
+    </div>
 </div>
 
 <script>
     const VERSION = "14.9.1";
     let champList = [];
-    let allSkillNames = []; 
+    let skillPool = []; 
     let correctCount = 0;
     let wrongCount = 0;
+    let currentIdx = 0;
+    let maxQuestions = 10;
     let currentSkillName = "";
+    let timer;
 
     async function init() {
         try {
@@ -187,89 +210,117 @@
             const data = await res.json();
             champList = Object.keys(data.data);
             
-            for(let i=0; i<30; i++){
-                const randomC = champList[Math.floor(Math.random() * champList.length)];
-                allSkillNames.push(data.data[randomC].name); 
+            const randomKeys = [...champList].sort(() => 0.5 - Math.random()).slice(0, 35);
+            for(let key of randomKeys) {
+                const cRes = await fetch(`https://ddragon.leagueoflegends.com/cdn/${VERSION}/data/en_US/champion/${key}.json`);
+                const cData = await cRes.json();
+                cData.data[key].spells.forEach(s => skillPool.push(s.name));
             }
-
-            document.getElementById('loader').style.display = 'none';
-            document.getElementById('game-ui').style.display = 'block';
-            nextQuestion();
         } catch (e) { console.error("Load Error"); }
     }
 
+    function startGame(num) {
+        maxQuestions = num;
+        document.getElementById('total-q').innerText = num;
+        document.getElementById('setup-screen').style.display = 'none';
+        document.getElementById('game-ui').style.display = 'block';
+        nextQuestion();
+    }
+
     async function nextQuestion() {
-        document.getElementById('status').innerText = "";
+        if(currentIdx >= maxQuestions) return showResults();
+        currentIdx++;
+        document.getElementById('current-q').innerText = currentIdx;
+        document.getElementById('status').innerText = "LOADING SKILL..."; // บอกสถานะโหลดรูป
         document.getElementById('next-btn').style.display = "none";
+        
+        const bar = document.getElementById('timer-bar');
+        bar.style.width = "100%"; // รีเซ็ตแถบเวลาก่อนเริ่ม
+        
         const img = document.getElementById('skill-img');
         img.style.opacity = "0";
 
         const randomChamp = champList[Math.floor(Math.random() * champList.length)];
-        
         try {
             const res = await fetch(`https://ddragon.leagueoflegends.com/cdn/${VERSION}/data/en_US/champion/${randomChamp}.json`);
             const data = await res.json();
-            const spells = data.data[randomChamp].spells;
-            const spell = spells[Math.floor(Math.random() * spells.length)];
-            
+            const spell = data.data[randomChamp].spells[Math.floor(Math.random() * 4)];
             currentSkillName = spell.name;
-            img.src = `https://ddragon.leagueoflegends.com/cdn/${VERSION}/img/spell/${spell.image.full}`;
-            img.onload = () => img.style.opacity = "1";
-
-            let choices = new Set();
-            choices.add(currentSkillName);
             
-            while(choices.size < 4) {
-                const fake = Math.random() > 0.5 ? champList[Math.floor(Math.random() * champList.length)] : allSkillNames[Math.floor(Math.random() * allSkillNames.length)];
-                if(fake !== currentSkillName) choices.add(fake);
-            }
+            img.src = `https://ddragon.leagueoflegends.com/cdn/${VERSION}/img/spell/${spell.image.full}`;
+            
+            // รอให้รูปโหลดเสร็จก่อนค่อยเริ่มนับเวลาและโชว์ตัวเลือก
+            img.onload = () => {
+                img.style.opacity = "1";
+                document.getElementById('status').innerText = "";
+                startTimer();
+            };
 
-            const finalChoices = Array.from(choices).sort(() => Math.random() - 0.5);
+            let choices = new Set([currentSkillName]);
+            while(choices.size < 4) { choices.add(skillPool[Math.floor(Math.random() * skillPool.length)]); }
+
             const optDiv = document.getElementById('options');
             optDiv.innerHTML = "";
-
-            finalChoices.forEach(c => {
+            Array.from(choices).sort(() => Math.random() - 0.5).forEach(c => {
                 const btn = document.createElement('button');
                 btn.innerText = c;
-                // เก็บค่าจริงไว้ใน dataset เพื่อใช้เช็คตอนเฉลย
                 btn.dataset.skill = c; 
                 btn.onclick = () => checkResult(btn);
                 optDiv.appendChild(btn);
             });
-
         } catch (e) { nextQuestion(); }
     }
 
+    function startTimer() {
+        clearInterval(timer);
+        const bar = document.getElementById('timer-bar');
+        let width = 100;
+        // ปรับเป็น 5.5 วินาที (5500ms)
+        // ทำงานทุกๆ 55ms เพื่อลดความกว้างทีละ 1% (รวม 100 ครั้ง = 5500ms)
+        timer = setInterval(() => {
+            width -= 1;
+            bar.style.width = width + "%";
+            if(width <= 0) { clearInterval(timer); checkResult(null); }
+        }, 55);
+    }
+
     function checkResult(clickedBtn) {
-        const selected = clickedBtn.dataset.skill;
+        clearInterval(timer);
         const btns = document.querySelectorAll('#options button');
         const statusEl = document.getElementById('status');
-        
         btns.forEach(b => b.disabled = true);
 
-        if(selected === currentSkillName) {
+        const isCorrect = clickedBtn && clickedBtn.dataset.skill === currentSkillName;
+
+        if(isCorrect) {
             clickedBtn.classList.add('reveal-correct');
             correctCount++;
-            statusEl.innerText = "ACCESS GRANTED";
+            statusEl.innerText = "PERFECT EXECUTION";
             statusEl.style.color = "var(--blue-hextech)";
         } else {
-            // ผิด: ปุ่มที่คลิกเป็นแดง
-            clickedBtn.classList.add('reveal-wrong');
+            if(clickedBtn) clickedBtn.classList.add('reveal-wrong');
             wrongCount++;
-            statusEl.innerText = "ACCESS DENIED";
+            statusEl.innerText = clickedBtn ? "OUTPLAYED" : "REACTION FAILED";
             statusEl.style.color = "var(--red-error)";
             
-            // เฉลย: บังคับให้ข้อที่ถูกเป็นเขียว โดยเช็คจาก dataset ที่เราเก็บไว้
+            // แสดงกรอบเขียวในข้อที่ถูกเสมอ
             btns.forEach(b => {
-                if(b.dataset.skill === currentSkillName) {
-                    b.classList.add('reveal-correct');
-                }
+                if(b.dataset.skill === currentSkillName) b.classList.add('reveal-correct');
             });
         }
         
         document.getElementById('correct-count').innerText = correctCount;
         document.getElementById('wrong-count').innerText = wrongCount;
         document.getElementById('next-btn').style.display = "block";
+    }
+
+    function showResults() {
+        document.getElementById('game-ui').style.display = 'none';
+        document.getElementById('result-screen').style.display = 'block';
+        document.getElementById('final-score').innerText = `${correctCount}/${maxQuestions}`;
+        const rate = (correctCount/maxQuestions) * 100;
+        let rank = rate >= 90 ? "CHALLENGER" : rate >= 70 ? "DIAMOND" : rate >= 40 ? "GOLD" : "IRON";
+        document.getElementById('rank-text').innerText = "RANK: " + rank;
     }
 
     init();
