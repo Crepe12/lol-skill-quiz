@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LoL Skill Quiz - Fast Load</title>
+    <style>
+        :root { --gold: #c8aa6e; --blue: #091428; --cyan: #0ac8b9; }
+        body { background: var(--blue); color: white; font-family: sans-serif; display: flex; justify-content: center; padding: 20px; margin: 0; }
+        .container { max-width: 500px; width: 100%; text-align: center; border: 2px solid var(--gold); padding: 20px; background: rgba(1,10,19,0.95); border-radius: 10px; margin-top: 20px; }
+        .skill-box { width: 100px; height: 100px; margin: 20px auto; border: 2px solid var(--gold); background: #000; overflow: hidden; }
+        #skill-img { width: 100%; height: 100%; object-fit: cover; }
+        .options-grid { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 20px; }
+        button { background: #1e2328; color: var(--gold); border: 1px solid var(--gold); padding: 12px; cursor: pointer; font-size: 16px; border-radius: 4px; transition: 0.2s; }
+        button:hover:not(:disabled) { background: var(--gold); color: var(--blue); }
+        button:disabled { opacity: 0.6; cursor: default; }
+        .correct { background: #1a472a !important; color: #00ff88 !important; border-color: #00ff88 !important; }
+        .wrong { background: #781c1c !important; color: #ff4444 !important; border-color: #ff4444 !important; }
+        #status { margin: 15px 0; font-weight: bold; min-height: 24px; font-size: 18px; }
+        #next-btn { width: 100%; margin-top: 20px; background: var(--cyan); color: #000; font-weight: bold; border: none; display: none; }
+        .loading-spinner { border: 4px solid rgba(200, 170, 110, 0.1); border-left-color: var(--gold); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2 style="color: var(--gold); margin-bottom: 5px;">LOL SKILL QUIZ</h2>
+    <p style="font-size: 12px; color: var(--cyan); margin-bottom: 20px;">Master of Abilities</p>
+    
+    <div id="loader">
+        <div class="loading-spinner"></div>
+        <p>กำลังดึงข้อมูลจากสมรภูมิ...</p>
+    </div>
+    
+    <div id="game-ui" style="display:none;">
+        <div id="champ-name" style="color: var(--cyan); font-weight: bold; letter-spacing: 2px;"></div>
+        <div class="skill-box">
+            <img id="skill-img" src="" alt="">
+        </div>
+        <div id="status"></div>
+        <div class="options-grid" id="options"></div>
+        <button id="next-btn" onclick="nextQuestion()">NEXT QUESTION</button>
+        <div style="margin-top: 25px; font-size: 14px; border-top: 1px solid #333; padding-top: 15px;">
+            Score: <span id="score">0</span> | Streak: <span id="streak">0</span> 🔥
+        </div>
+    </div>
+</div>
+
+<script>
+    const VERSION = "14.9.1";
+    let skillPool = [];
+    let current = null;
+    let score = 0;
+    let streak = 0;
+
+    async function init() {
+        try {
+            // ดึงรายชื่อแชมเปียนทั้งหมดก่อน
+            const res = await fetch(`https://ddragon.leagueoflegends.com/cdn/${VERSION}/data/en_US/champion.json`);
+            const data = await res.json();
+            const allNames = Object.keys(data.data);
+
+            // สุ่มมา 15 ตัวพอ เพื่อความเร็วในการโหลดครั้งแรก
+            const selectedChamps = allNames.sort(() => 0.5 - Math.random()).slice(0, 15);
+            
+            // ดึงข้อมูลแบบ Parallel (พร้อมกัน)
+            const promises = selectedChamps.map(name => 
+                fetch(`https://ddragon.leagueoflegends.com/cdn/${VERSION}/data/en_US/champion/${name}.json`).then(r => r.json())
+            );
+
+            const results = await Promise.all(promises);
+            
+            results.forEach(cData => {
+                const champKey = Object.keys(cData.data)[0];
+                const detail = cData.data[champKey];
+                detail.spells.forEach(s => {
+                    skillPool.push({
+                        skillName: s.name,
+                        champName: detail.name,
+                        img: `https://ddragon.leagueoflegends.com/cdn/${VERSION}/img/spell/${s.image.full}`
+                    });
+                });
+            });
+
+            document.getElementById('loader').style.display = 'none';
+            document.getElementById('game-ui').style.display = 'block';
+            nextQuestion();
+        } catch (e) {
+            document.getElementById('loader').innerHTML = "<p style='color:red;'>โหลดไม่สำเร็จ กรุณาลองใหม่อีกครั้ง</p>";
+        }
+    }
+
+    function nextQuestion() {
+        if (skillPool.length === 0) return;
+        
+        document.getElementById('status').innerText = "";
+        document.getElementById('next-btn').style.display = "none";
+        
+        current = skillPool[Math.floor(Math.random() * skillPool.length)];
+        
+        const img = document.getElementById('skill-img');
+        img.src = current.img;
+        document.getElementById('champ-name').innerText = current.champName.toUpperCase();
+
+        // สร้างตัวเลือกโดยสุ่มจาก Pool
+        let choices = [current.skillName];
+        while(choices.length < 4) {
+            let rand = skillPool[Math.floor(Math.random() * skillPool.length)].skillName;
+            if(!choices.includes(rand)) choices.push(rand);
+        }
+        choices.sort(() => 0.5 - Math.random());
+
+        const optDiv = document.getElementById('options');
+        optDiv.innerHTML = "";
+        choices.forEach(c => {
+            const btn = document.createElement('button');
+            btn.innerText = c;
+            btn.onclick = () => check(c, btn);
+            optDiv.appendChild(btn);
+        });
+    }
+
+    function check(selected, btn) {
+        const btns = document.querySelectorAll('#options button');
+        btns.forEach(b => b.disabled = true);
+
+        if(selected === current.skillName) {
+            btn.classList.add('correct');
+            score += 10;
+            streak++;
+            document.getElementById('status').innerText = "Correct! ✨";
+            document.getElementById('status').style.color = "#00ff88";
+        } else {
+            btn.classList.add('wrong');
+            streak = 0;
+            document.getElementById('status').innerText = `It was: ${current.skillName}`;
+            document.getElementById('status').style.color = "#ff4444";
+            btns.forEach(b => {
+                if(b.innerText === current.skillName) b.classList.add('correct');
+            });
+        }
+        
+        document.getElementById('score').innerText = score;
+        document.getElementById('streak').innerText = streak;
+        document.getElementById('next-btn').style.display = "block";
+    }
+
+    init();
+</script>
+</body>
+</html>
